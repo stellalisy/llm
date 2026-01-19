@@ -133,7 +133,16 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
             temperature: Optional[float] = None, 
             max_tokens: Optional[int] = None
         ):
-        completion = self.client.chat.completions.create(model=self.args.model,
+        if "gpt-5" in self.args.model:
+            completion = self.client.chat.completions.create(model=self.args.model,
+                                                         response_format={ "type": "json_object" },  
+                                                         messages=[
+                                                            {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
+                                                            {"role": "user", "content": f"{prompt}"}
+                                                            ],
+                                                         )
+        else:
+            completion = self.client.chat.completions.create(model=self.args.model,
                                                          response_format={ "type": "json_object" },  
                                                          messages=[
                                                             {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
@@ -151,7 +160,13 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
             temperature: Optional[float] = None, 
             max_tokens: Optional[int] = None
             ):
-        completion = self.client.chat.completions.create(model=self.args.model,
+        if "gpt-5" in self.args.model:
+            completion = self.client.chat.completions.create(model=self.args.model,
+                                                         response_format={ "type": "json_object" },
+                                                         messages=messages,
+                                                         )
+        else:
+            completion = self.client.chat.completions.create(model=self.args.model,
                                                          response_format={ "type": "json_object" },
                                                          messages=messages,
                                                          temperature=self.args.temperature if temperature is None else temperature,
@@ -250,16 +265,27 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
                         else:
                             messages.append({"role": "assistant", "content": f"{msg}"})
                 messages.append({"role": "user", "content": f"{prompt}"})
-        
-                completion = self.client.chat.completions.create(model=self.args.model,
+                if "gpt-5" in self.args.model:
+                    completion = self.client.chat.completions.create(model=self.args.model,
+                                                            messages=messages,
+                                                            max_completion_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
+                else:
+                    completion = self.client.chat.completions.create(model=self.args.model,
                                                             messages=messages,
                                                             temperature=self.args.temperature if temperature is None else temperature,
                                                             max_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
                 return completion
             except openai.BadRequestError as e:
-                if "context_length_exceeded" in str(e):
+                if "context_length_exceeded" in str(e) or "maximum context length" in str(e):
                     if retries > 1:
-                        prompt = prompt[int(len(prompt) * 0.2):]
+                        if "maximum context length is " in str(e) and "your messages resulted in " in str(e):
+                            max_context_length = int(str(e).split("maximum context length is ")[1].split()[0])
+                            prompt_length = int(str(e).split("your messages resulted in ")[1].split()[0])
+                            temp_max_tokens = self.args.max_tokens if max_tokens is None else max_tokens
+                            amount_to_truncate = int((prompt_length - max_context_length + temp_max_tokens + 10)/prompt_length * len(prompt))
+                            prompt = prompt[amount_to_truncate:]
+                        else:
+                            prompt = prompt[int(len(prompt) * 0.2):]
                     else:
                         prompt = prompt[int(len(prompt) * 0.5):]
                 retries -= 1
@@ -274,7 +300,12 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
     @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _generate_from_messages(self, messages, temperature=None, max_tokens=None):
-        completion = self.client.chat.completions.create(model=self.args.model,
+        if "gpt-5" in self.args.model:
+            completion = self.client.chat.completions.create(model=self.args.model,
+                                                         messages=messages,
+                                                         max_completion_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
+        else:
+            completion = self.client.chat.completions.create(model=self.args.model,
                                                          messages=messages,
                                                          temperature=self.args.temperature if temperature is None else temperature,
                                                          max_tokens=self.args.max_tokens if max_tokens is None else max_tokens)

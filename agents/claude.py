@@ -37,12 +37,17 @@ class AsyncClaudeAgent(AsyncBaseAgent):
         # if not aws_secret_access_key: aws_secret_access_key = os.environ["AWS_SECRET_ACCESS_KEY"]
         # if not aws_session_token: aws_session_token = os.environ["AWS_SESSION_TOKEN"]
 
+        from botocore.config import Config
+        
+        config = Config(read_timeout=1000)
+        
         self.client = boto3.client(
             "bedrock-runtime",
             region_name="us-west-2",
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=aws_secret_access_key,
             aws_session_token=aws_session_token,
+            config=config,
         )
     
     def interact(self, prompt, temperature=0, max_tokens=256, history=None, json_mode=False, response_format=None, **kwargs):
