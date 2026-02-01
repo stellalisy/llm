@@ -109,6 +109,7 @@ class AsyncGeminiAgent(AsyncBaseAgent):
         for message in messages:
             if isinstance(message, dict):
                 role = message.get('role', 'user')
+                if role == "system": role = "user"
                 content = message.get('content', '')
                 contents.append({
                     'role': role,

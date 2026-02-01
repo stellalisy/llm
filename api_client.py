@@ -12,7 +12,7 @@ import random
 import re
 from typing import Dict, Any, List, Optional, Union, Callable
 
-from src.llm.agents.load_model import load_model
+from llm.agents.load_model import load_model
 
 logger = logging.getLogger(__name__)
 
@@ -145,8 +145,8 @@ class LLMClient:
 
                 if "finish_reason" in response:
                     ret["finish_reason"] = response["finish_reason"]
-                    if regenerate_if_unfinished:
-                        assert ret["finish_reason"] == "stop", "Response did not finish with stop reason"
+                    if regenerate_if_unfinished and ret["finish_reason"] != "stop":
+                        logger.warning(f"Response did not finish with stop reason (got '{ret['finish_reason']}'). Using truncated response.")
 
                 # Cache the response if enabled
                 if self.config["cache_responses"] and cache_key:

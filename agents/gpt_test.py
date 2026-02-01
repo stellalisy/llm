@@ -4,13 +4,13 @@ import os
 
 info="""
   api_type: "azure"
-  command: "secrets_tool get_group AZ_FAIR_OPENAI1_EASTUS2N3_SAGE"
-  secret: "	AZ_FAIR_OPENAI1_EASTUS2N3_SAGE"
-  model_name: "gpt-5-mini"
-  api_key: "ad288df7a2b649f084f2aff4eeb82fc0"
-  SECONDARY_KEY: 63ff1711c5054a7d8f6343a4cb589cfd
-  api_base: "https://azure-services-fair-openai1-eastus2n3.azure-api.net"
-  api_version: "2025-03-01-preview"
+  command: "secrets_tool get_group AZ_FAIR_OPENAI1_WESTUS_SAGE"
+  secret: "AZ_FAIR_OPENAI1_WESTUS_SAGE"
+  model_name: "gpt-4o"
+  api_key: "f5685cb3fcdf414ab6ce103807396265"
+  SECONDARY_KEY: 14b61c686ed64239bea38c35b2eaddb0
+  api_base: "https://azure-services-fair-openai1-westus.azure-api.net"
+  api_version: "2024-06-01"
 """
 
 config = yaml.safe_load(info)
