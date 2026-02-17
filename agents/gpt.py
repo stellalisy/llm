@@ -37,6 +37,12 @@ USAGE_TRACKING_DIR = os.path.join(os.path.dirname(__file__), 'usage_tracking')
 os.makedirs(USAGE_TRACKING_DIR, exist_ok=True)
 
 STRUCTURED_OUTPUT_MODELS = ("gpt-4o-mini", "gpt-4o-2024-08-06")
+RETRY_EXCEPTIONS = (
+    openai.RateLimitError,
+    openai.APIError,
+    openai.APITimeoutError,
+    openai.APIConnectionError,
+)
 
 class GPT3BaseAgent(BaseAgent):
     def __init__(self, kwargs: dict):

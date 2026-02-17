@@ -12,7 +12,10 @@ import random
 import re
 from typing import Dict, Any, List, Optional, Union, Callable
 
-from llm.agents.load_model import load_model
+try:
+    from .agents.load_model import load_model
+except ImportError:
+    from llm.agents.load_model import load_model
 
 logger = logging.getLogger(__name__)
 
