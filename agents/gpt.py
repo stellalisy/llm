@@ -16,33 +16,15 @@ from typing import Dict, List, Optional, Tuple, Any
 from .base import BaseAgent
 import yaml
 
-# Import OpenAI exceptions with compatibility for different library versions
-try:
-    from openai import RateLimitError, APIError, Timeout, APIConnectionError, BadRequestError
-except ImportError:
-    try:
-        # Try importing from openai.error (older versions)
-        from openai.error import RateLimitError, APIError, Timeout, APIConnectionError, BadRequestError
-    except (ImportError, AttributeError):
-        # Fallback to Exception if imports fail
-        RateLimitError = Exception
-        APIError = Exception
-        Timeout = Exception
-        APIConnectionError = Exception
-        BadRequestError = Exception
-
-OPENAI_RETRY_EXCEPTIONS = (RateLimitError, APIError, Timeout, APIConnectionError)
-
 USAGE_TRACKING_DIR = os.path.join(os.path.dirname(__file__), 'usage_tracking')
 os.makedirs(USAGE_TRACKING_DIR, exist_ok=True)
 
 STRUCTURED_OUTPUT_MODELS = ("gpt-4o-mini", "gpt-4o-2024-08-06")
-RETRY_EXCEPTIONS = (
-    openai.RateLimitError,
-    openai.APIError,
-    openai.APITimeoutError,
-    openai.APIConnectionError,
-)
+
+# Compatibility for different openai SDK versions.
+# Older code referenced `openai.Timeout`, which may not exist in newer SDKs.
+if not hasattr(openai, "Timeout"):
+    openai.Timeout = getattr(openai, "APITimeoutError", Exception)
 
 class GPT3BaseAgent(BaseAgent):
     def __init__(self, kwargs: dict):
@@ -81,7 +63,7 @@ class GPT3BaseAgent(BaseAgent):
         if not hasattr(self.args, 'n'):
             self.args.n = 1
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     # @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _generate(self, prompt, temperature=None, max_tokens=None):
         completion = self.client.completions.create(model=self.args.model,
@@ -148,7 +130,7 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
         if not hasattr(self.args, 'presence_penalty'):
             self.args.presence_penalty = 0
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _json_generate(
             self, 
@@ -156,16 +138,7 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
             temperature: Optional[float] = None, 
             max_tokens: Optional[int] = None
         ):
-        if "gpt-5" in self.args.model:
-            completion = self.client.chat.completions.create(model=self.args.model,
-                                                         response_format={ "type": "json_object" },  
-                                                         messages=[
-                                                            {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
-                                                            {"role": "user", "content": f"{prompt}"}
-                                                            ],
-                                                         )
-        else:
-            completion = self.client.chat.completions.create(model=self.args.model,
+        completion = self.client.chat.completions.create(model=self.args.model,
                                                          response_format={ "type": "json_object" },  
                                                          messages=[
                                                             {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
@@ -175,7 +148,7 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
                                                          max_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
         return completion
     
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _json_generate_from_messages(
             self, 
@@ -183,20 +156,14 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
             temperature: Optional[float] = None, 
             max_tokens: Optional[int] = None
             ):
-        if "gpt-5" in self.args.model:
-            completion = self.client.chat.completions.create(model=self.args.model,
-                                                         response_format={ "type": "json_object" },
-                                                         messages=messages,
-                                                         )
-        else:
-            completion = self.client.chat.completions.create(model=self.args.model,
+        completion = self.client.chat.completions.create(model=self.args.model,
                                                          response_format={ "type": "json_object" },
                                                          messages=messages,
                                                          temperature=self.args.temperature if temperature is None else temperature,
                                                          max_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
         return completion
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _structured_generate(self, prompt, temperature=None, max_tokens=None, response_format=None):
         completion = self.client.beta.chat.completions.parse(model=self.args.model,
@@ -207,7 +174,7 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
 
         return completion
     
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _structured_generate_from_messages(self, messages, temperature=None, max_tokens=None, response_format=None):
         completion = self.client.beta.chat.completions.parse(model=self.args.model,
@@ -273,7 +240,7 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
 
         return responses
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _generate(self, prompt, temperature=None, max_tokens=None, history=None):
         retries = 3
@@ -288,27 +255,16 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
                         else:
                             messages.append({"role": "assistant", "content": f"{msg}"})
                 messages.append({"role": "user", "content": f"{prompt}"})
-                if "gpt-5" in self.args.model:
-                    completion = self.client.chat.completions.create(model=self.args.model,
-                                                            messages=messages,
-                                                            max_completion_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
-                else:
-                    completion = self.client.chat.completions.create(model=self.args.model,
+        
+                completion = self.client.chat.completions.create(model=self.args.model,
                                                             messages=messages,
                                                             temperature=self.args.temperature if temperature is None else temperature,
                                                             max_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
                 return completion
-            except BadRequestError as e:
-                if "context_length_exceeded" in str(e) or "maximum context length" in str(e):
+            except openai.BadRequestError as e:
+                if "context_length_exceeded" in str(e):
                     if retries > 1:
-                        if "maximum context length is " in str(e) and "your messages resulted in " in str(e):
-                            max_context_length = int(str(e).split("maximum context length is ")[1].split()[0])
-                            prompt_length = int(str(e).split("your messages resulted in ")[1].split()[0])
-                            temp_max_tokens = self.args.max_tokens if max_tokens is None else max_tokens
-                            amount_to_truncate = int((prompt_length - max_context_length + temp_max_tokens + 10)/prompt_length * len(prompt))
-                            prompt = prompt[amount_to_truncate:]
-                        else:
-                            prompt = prompt[int(len(prompt) * 0.2):]
+                        prompt = prompt[int(len(prompt) * 0.2):]
                     else:
                         prompt = prompt[int(len(prompt) * 0.5):]
                 retries -= 1
@@ -320,15 +276,10 @@ class ConversationalGPTBaseAgent(GPT3BaseAgent):
                     raise Exception(f"Failed to generate response: {e}")
 
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _generate_from_messages(self, messages, temperature=None, max_tokens=None):
-        if "gpt-5" in self.args.model:
-            completion = self.client.chat.completions.create(model=self.args.model,
-                                                         messages=messages,
-                                                         max_completion_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
-        else:
-            completion = self.client.chat.completions.create(model=self.args.model,
+        completion = self.client.chat.completions.create(model=self.args.model,
                                                          messages=messages,
                                                          temperature=self.args.temperature if temperature is None else temperature,
                                                          max_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
@@ -374,7 +325,7 @@ class AsyncConversationalGPTBaseAgent(ConversationalGPTBaseAgent):
                                                 for prompt in prompts])
         return completions
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def batch_interact(self, prompts, temperature=0, max_tokens=256, response_format=None):
         outputs = asyncio.run(self.batch_generate(prompts, temperature, max_tokens, response_format))
@@ -403,7 +354,7 @@ class ConversationalGPTReasoningAgent(GPT3BaseAgent):
         if not hasattr(self.args, 'max_tokens'):
             self.args.max_tokens = 256
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _json_generate(
             self, 
@@ -422,7 +373,7 @@ class ConversationalGPTReasoningAgent(GPT3BaseAgent):
                                                          )
         return completion
     
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _json_generate_from_messages(
             self, 
@@ -437,7 +388,7 @@ class ConversationalGPTReasoningAgent(GPT3BaseAgent):
                                                          max_completion_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
         return completion
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _structured_generate(self, prompt, reasoning_effort="high", max_tokens=None, response_format=None):
         completion = self.client.beta.chat.completions.parse(model=self.args.model,
@@ -448,7 +399,7 @@ class ConversationalGPTReasoningAgent(GPT3BaseAgent):
 
         return completion
     
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _structured_generate_from_messages(self, messages, reasoning_effort="high", max_tokens=None, response_format=None):
         completion = self.client.beta.chat.completions.parse(model=self.args.model,
@@ -515,7 +466,7 @@ class ConversationalGPTReasoningAgent(GPT3BaseAgent):
 
         return responses
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _generate(self, prompt, reasoning_effort="high", max_tokens=None, history=None):
         retries = 5
@@ -541,7 +492,7 @@ class ConversationalGPTReasoningAgent(GPT3BaseAgent):
                                                                 max_completion_tokens=self.args.max_tokens if max_tokens is None else max_tokens)
 
                 return completion
-            except BadRequestError as e:
+            except openai.BadRequestError as e:
                 if "context_length_exceeded" in str(e):
                     if retries > 1:
                         prompt = prompt[int(len(prompt) * 0.2):]
@@ -556,7 +507,7 @@ class ConversationalGPTReasoningAgent(GPT3BaseAgent):
                     raise Exception(f"Failed to generate response: {e}")
 
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _generate_from_messages(self, messages, reasoning_effort="high", max_tokens=None):
         if "o1-mini" in self.args.model:
@@ -615,7 +566,7 @@ class AsyncConversationalGPTReasoningAgent(ConversationalGPTReasoningAgent):
                                                 for prompt in prompts])
         return completions
 
-    # @backoff.on_exception(backoff.expo, OPENAI_RETRY_EXCEPTIONS) # Commented out - using LLMClient retry logic instead
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError, openai.Timeout, openai.APIConnectionError))
     #@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def batch_interact(self, prompts, reasoning_effort="high", max_tokens=256, response_format=None):
         outputs = asyncio.run(self.batch_generate(prompts, reasoning_effort=reasoning_effort, max_tokens=max_tokens, response_format=response_format))

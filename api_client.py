@@ -76,8 +76,7 @@ class LLMClient:
         temperature: Optional[float] = None,
         response_format: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
-        regenerate_if_unfinished: bool = False,
-        enable_thinking: bool = True
+        regenerate_if_unfinished: bool = False
     ) -> str:
         """
         Chat with the model.
@@ -126,8 +125,7 @@ class LLMClient:
                     temperature=temp,
                     response_format=response_format,
                     reasoning_effort=effort,
-                    json_mode=json_mode,
-                    enable_thinking=enable_thinking
+                    json_mode=json_mode
                 )
                 response_text, input_tokens, cached_tokens, output_tokens, reasoning_tokens = response["response_text"], response["input_tokens"], response["cached_tokens"], response["output_tokens"], response.get("reasoning_tokens", 0)
 
@@ -148,8 +146,8 @@ class LLMClient:
 
                 if "finish_reason" in response:
                     ret["finish_reason"] = response["finish_reason"]
-                    if regenerate_if_unfinished and ret["finish_reason"] != "stop":
-                        logger.warning(f"Response did not finish with stop reason (got '{ret['finish_reason']}'). Using truncated response.")
+                    if regenerate_if_unfinished:
+                        assert ret["finish_reason"] == "stop", "Response did not finish with stop reason"
 
                 # Cache the response if enabled
                 if self.config["cache_responses"] and cache_key:
@@ -179,8 +177,7 @@ class LLMClient:
         response_format: Optional[Union[str, Dict[str, Any]]] = None,
         system_prompt: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
-        regenerate_if_unfinished: bool = False,
-        enable_thinking: bool = True
+        regenerate_if_unfinished: bool = False
     ) -> str:
         """
         Generate text based on a prompt.
@@ -237,20 +234,9 @@ class LLMClient:
                     temperature=temp,
                     response_format=response_format,
                     reasoning_effort=effort,
-                    json_mode=json_mode,
-                    enable_thinking=enable_thinking
+                    json_mode=json_mode
                 )
-                response_text = response.get("response_text")
-
-                # Handle None response from API
-                if response_text is None:
-                    retries += 1
-                    logger.warning(f"API returned None response (attempt {retries}/{self.config['max_retries']})")
-                    if retries < self.config["max_retries"]:
-                        time.sleep(self.config["retry_delay"])
-                        continue
-                    else:
-                        raise ValueError("API returned None response after all retries")
+                response_text = response["response_text"]
 
                 if json_mode:
                     response_text = re.sub(r"^```(?:json)?\n|\n```$", "", response_text.strip())
