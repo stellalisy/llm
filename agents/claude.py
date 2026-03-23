@@ -1,4 +1,5 @@
 import os
+import logging
 from types import SimpleNamespace
 
 import boto3
@@ -9,11 +10,22 @@ from .base import AsyncBaseAgent
 from pydantic import BaseModel
 import yaml
 
+logger = logging.getLogger(__name__)
 
 class Recipe(BaseModel):
   recipe_name: str
   ingredients: list[str]
 
+CLAUDE_KEYS_FILE = os.path.join(os.path.dirname(__file__), "..", "claude_keys_uptodate.txt")
+
+CREDENTIAL_EXPIRED_MARKERS = [
+    "security token included in the request is invalid",
+    "security token included in the request is expired",
+    "UnrecognizedClientException",
+    "ExpiredTokenException",
+    "InvalidIdentityToken",
+    "The security token",
+]
 
 # Models that support structured output
 STRUCTURED_OUTPUT_MODELS = ["claude-3-5-sonnet-20241022-v1:0", "claude-3-5-haiku-20241007-v1:0", "claude-3-5-sonnet-20250219-v1:0"]
@@ -24,31 +36,73 @@ class AsyncClaudeAgent(AsyncBaseAgent):
         super().__init__()
         self.args = SimpleNamespace(**kwargs)
         self._set_default_args()
+        self._credentials_refreshed = False
         
         if not os.path.exists(self.args.api_info):
             raise ValueError(f"API info file {self.args.api_info} not found")
         with open(self.args.api_info, 'r') as f:
             self.api_info = yaml.safe_load(f).get(self.args.api_account, {})
 
-        aws_access_key_id = os.environ.get("AWS_ACCESS_KEY_ID", self.api_info.get("aws_access_key_id", ""))
-        aws_secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY", self.api_info.get("aws_secret_access_key", ""))
-        aws_session_token = os.environ.get("AWS_SESSION_TOKEN", self.api_info.get("aws_session_token", ""))
-        # if not aws_access_key_id: aws_access_key_id = os.environ["AWS_ACCESS_KEY_ID"]
-        # if not aws_secret_access_key: aws_secret_access_key = os.environ["AWS_SECRET_ACCESS_KEY"]
-        # if not aws_session_token: aws_session_token = os.environ["AWS_SESSION_TOKEN"]
+        self._init_client_from_credentials()
 
+    def _parse_claude_keys_file(self):
+        """Read credentials from claude_keys_uptodate.txt."""
+        if not os.path.exists(CLAUDE_KEYS_FILE):
+            return None
+        creds = {}
+        with open(CLAUDE_KEYS_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("export "):
+                    line = line[7:]
+                if "=" in line:
+                    key, val = line.split("=", 1)
+                    creds[key.strip()] = val.strip()
+        if "AWS_ACCESS_KEY_ID" in creds:
+            return creds
+        return None
+
+    def _get_credentials(self):
+        """Get credentials, preferring claude_keys_uptodate.txt over api_info.yaml."""
+        file_creds = self._parse_claude_keys_file()
+        if file_creds:
+            return {
+                "aws_access_key_id": file_creds["AWS_ACCESS_KEY_ID"],
+                "aws_secret_access_key": file_creds["AWS_SECRET_ACCESS_KEY"],
+                "aws_session_token": file_creds.get("AWS_SESSION_TOKEN", ""),
+                "expiry_time": file_creds.get("EXPIRY_TIME", "unknown"),
+            }
+        return {
+            "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID", self.api_info.get("aws_access_key_id", "")),
+            "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY", self.api_info.get("aws_secret_access_key", "")),
+            "aws_session_token": os.environ.get("AWS_SESSION_TOKEN", self.api_info.get("aws_session_token", "")),
+        }
+
+    def _init_client_from_credentials(self):
+        """(Re)initialize the boto3 Bedrock client with current credentials."""
         from botocore.config import Config
-        
+        creds = self._get_credentials()
         config = Config(read_timeout=1000)
-        
         self.client = boto3.client(
             "bedrock-runtime",
             region_name="us-west-2",
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-            aws_session_token=aws_session_token,
+            aws_access_key_id=creds["aws_access_key_id"],
+            aws_secret_access_key=creds["aws_secret_access_key"],
+            aws_session_token=creds["aws_session_token"],
             config=config,
         )
+        expiry = creds.get("expiry_time", "unknown")
+        logger.info(f"Claude client initialized (key_id=...{creds['aws_access_key_id'][-4:]}, expires={expiry})")
+
+    def _is_credential_error(self, error: Exception) -> bool:
+        err_str = str(error)
+        return any(marker.lower() in err_str.lower() for marker in CREDENTIAL_EXPIRED_MARKERS)
+
+    def _refresh_credentials_and_retry(self):
+        """Attempt to refresh credentials from file and reinitialize client."""
+        logger.warning("Detected credential error, attempting to refresh from claude_keys_uptodate.txt...")
+        self._init_client_from_credentials()
+        self._credentials_refreshed = True
     
     def interact(self, prompt, temperature=0, max_tokens=256, history=None, json_mode=False, response_format=None, **kwargs):
         if json_mode:
@@ -130,6 +184,9 @@ class AsyncClaudeAgent(AsyncBaseAgent):
                 )
                 return response
             except Exception as e:
+                if self._is_credential_error(e) and not self._credentials_refreshed:
+                    self._refresh_credentials_and_retry()
+                    continue
                 if "Input is too long" in str(e) or "exceed context limit" in str(e):
                     if retries > 1:
                         prompt = prompt[int(len(prompt) * 0.2):]
