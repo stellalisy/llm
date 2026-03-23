@@ -167,12 +167,11 @@ class AsyncClaudeAgent(AsyncBaseAgent):
                 elif hasattr(self.args, 'temperature'):
                     body["temperature"] = self.args.temperature
                 
-                # Handle JSON mode
-                if json_mode:
+                # Handle JSON mode / structured output (only for supported models)
+                if json_mode and self.args.model in STRUCTURED_OUTPUT_MODELS:
                     body["response_format"] = {"type": "json_object"}
                 
-                # Handle structured output
-                elif response_format:
+                elif response_format and self.args.model in STRUCTURED_OUTPUT_MODELS:
                     body["response_format"] = response_format
                     # Note: Claude's structured output is handled differently than Gemini
                     # You might need to add the schema to the prompt or use a different approach
