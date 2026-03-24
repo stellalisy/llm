@@ -11,3 +11,6 @@ output = client.models.generate_content(
         )
 
 print(output)
+print()
+response_text = output.candidates[0].content.parts[0].text
+print(response_text)

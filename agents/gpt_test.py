@@ -4,13 +4,14 @@ import os
 
 info="""
   api_type: "azure"
-  command: "secrets_tool get_group AZ_FAIR_OPENAI1_WESTUS_SAGE"
-  secret: "AZ_FAIR_OPENAI1_WESTUS_SAGE"
-  model_name: "gpt-4o"
-  api_key: "f5685cb3fcdf414ab6ce103807396265"
-  SECONDARY_KEY: 14b61c686ed64239bea38c35b2eaddb0
-  api_base: "https://azure-services-fair-openai1-westus.azure-api.net"
-  api_version: "2024-06-01"
+  command: "secrets_tool get_group AZ_FAIR_OPENAI2_EASTUS2N3_SAGE"
+  secret: "AZ_FAIR_OPENAI2_EASTUS2N3_SAGE"
+  model_name: "o4-mini"
+  api_base: ""
+  api_key: ""
+  secondary_api_key: ""
+  model_version: "2025-04-16"
+  api_version: "2024-12-01-preview"
 """
 
 config = yaml.safe_load(info)
@@ -29,4 +30,5 @@ response = client.chat.completions.create(model=config.get("model_name", "gpt-4.
                                                     )
 
 print(response)
+print()
 print(response.choices[0].message.content)
