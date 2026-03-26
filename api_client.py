@@ -19,6 +19,17 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+_TRAILING_COMMA_RE = re.compile(r',\s*([}\]])')
+
+
+def sanitize_json_text(text: str) -> str:
+    """Fix common LLM JSON quirks (trailing commas, markdown fences)."""
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\n|\n```$", "", text)
+    text = _TRAILING_COMMA_RE.sub(r'\1', text)
+    return text
+
+
 class LLMClient:
     """
     Client for accessing language model services. Provides a unified interface
@@ -129,8 +140,7 @@ class LLMClient:
                 )
                 response_text, input_tokens, cached_tokens, output_tokens, reasoning_tokens = response["response_text"], response["input_tokens"], response["cached_tokens"], response["output_tokens"], response.get("reasoning_tokens", 0)
 
-                if response_format == "json":
-                    response_text = re.sub(r"^```(?:json)?\n|\n```$", "", response_text.strip())
+                response_text = sanitize_json_text(response_text)
                 
                 # Log the response if enabled
                 if self.config["log_responses"]:
@@ -238,8 +248,7 @@ class LLMClient:
                 )
                 response_text = response["response_text"]
 
-                if json_mode:
-                    response_text = re.sub(r"^```(?:json)?\n|\n```$", "", response_text.strip())
+                response_text = sanitize_json_text(response_text)
                 
                 # Log the response if enabled
                 if self.config["log_responses"]:

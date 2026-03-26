@@ -32,11 +32,14 @@ STRUCTURED_OUTPUT_MODELS = ["claude-3-5-sonnet-20241022-v1:0", "claude-3-5-haiku
 
 
 class AsyncClaudeAgent(AsyncBaseAgent):
+    CREDENTIAL_REFRESH_COOLDOWN = 60  # seconds between refresh attempts
+
     def __init__(self, kwargs: dict):
         super().__init__()
         self.args = SimpleNamespace(**kwargs)
         self._set_default_args()
-        self._credentials_refreshed = False
+        self._last_refresh_time = 0
+        self._last_keys_mtime = 0
         
         if not os.path.exists(self.args.api_info):
             raise ValueError(f"API info file {self.args.api_info} not found")
@@ -91,6 +94,8 @@ class AsyncClaudeAgent(AsyncBaseAgent):
             aws_session_token=creds["aws_session_token"],
             config=config,
         )
+        if os.path.exists(CLAUDE_KEYS_FILE):
+            self._last_keys_mtime = os.path.getmtime(CLAUDE_KEYS_FILE)
         expiry = creds.get("expiry_time", "unknown")
         logger.info(f"Claude client initialized (key_id=...{creds['aws_access_key_id'][-4:]}, expires={expiry})")
 
@@ -98,11 +103,37 @@ class AsyncClaudeAgent(AsyncBaseAgent):
         err_str = str(error)
         return any(marker.lower() in err_str.lower() for marker in CREDENTIAL_EXPIRED_MARKERS)
 
-    def _refresh_credentials_and_retry(self):
-        """Attempt to refresh credentials from file and reinitialize client."""
-        logger.warning("Detected credential error, attempting to refresh from claude_keys_uptodate.txt...")
-        self._init_client_from_credentials()
-        self._credentials_refreshed = True
+    def _should_attempt_refresh(self) -> bool:
+        """Check if enough time has passed and the keys file has been updated."""
+        now = time.time()
+        if now - self._last_refresh_time < self.CREDENTIAL_REFRESH_COOLDOWN:
+            return False
+        if os.path.exists(CLAUDE_KEYS_FILE):
+            current_mtime = os.path.getmtime(CLAUDE_KEYS_FILE)
+            if current_mtime > self._last_keys_mtime:
+                return True
+        return now - self._last_refresh_time >= self.CREDENTIAL_REFRESH_COOLDOWN
+
+    def _refresh_credentials_and_retry(self) -> bool:
+        """Attempt to refresh credentials from file and reinitialize client.
+        Returns True if credentials were actually updated, False if file unchanged."""
+        if not self._should_attempt_refresh():
+            return False
+        self._last_refresh_time = time.time()
+        if os.path.exists(CLAUDE_KEYS_FILE):
+            current_mtime = os.path.getmtime(CLAUDE_KEYS_FILE)
+            if current_mtime > self._last_keys_mtime:
+                logger.warning("Keys file updated, refreshing credentials from claude_keys_uptodate.txt...")
+                self._init_client_from_credentials()
+                return True
+            else:
+                logger.warning(
+                    f"Credential error but keys file unchanged (mtime={current_mtime}). "
+                    f"Waiting for external refresh of {CLAUDE_KEYS_FILE}"
+                )
+                return False
+        logger.warning(f"Credential error but {CLAUDE_KEYS_FILE} not found.")
+        return False
     
     def interact(self, prompt, temperature=0, max_tokens=256, history=None, json_mode=False, response_format=None, **kwargs):
         if json_mode:
@@ -183,8 +214,16 @@ class AsyncClaudeAgent(AsyncBaseAgent):
                 )
                 return response
             except Exception as e:
-                if self._is_credential_error(e) and not self._credentials_refreshed:
-                    self._refresh_credentials_and_retry()
+                if self._is_credential_error(e):
+                    refreshed = self._refresh_credentials_and_retry()
+                    if refreshed:
+                        continue
+                    # File not updated yet -- wait and let external process refresh it
+                    logger.warning(f"Credentials expired, waiting {self.CREDENTIAL_REFRESH_COOLDOWN}s for external key refresh...")
+                    time.sleep(self.CREDENTIAL_REFRESH_COOLDOWN)
+                    retries -= 1
+                    if retries == 0:
+                        raise Exception(f"Failed to generate response: {e}")
                     continue
                 if "Input is too long" in str(e) or "exceed context limit" in str(e):
                     if retries > 1:
