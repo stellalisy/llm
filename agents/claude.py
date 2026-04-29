@@ -167,7 +167,7 @@ class AsyncClaudeAgent(AsyncBaseAgent):
     def _generate(self, prompt, json_mode=False, temperature=None, max_tokens=None, history=None, response_format=None):
         # Prepare messages
         
-        retries = 3
+        retries = 5
         while retries > 0:
             try:
                 messages = []
@@ -225,11 +225,9 @@ class AsyncClaudeAgent(AsyncBaseAgent):
                     if retries == 0:
                         raise Exception(f"Failed to generate response: {e}")
                     continue
-                if "Input is too long" in str(e) or "exceed context limit" in str(e):
-                    if retries > 1:
-                        prompt = prompt[int(len(prompt) * 0.2):]
-                    else:
-                        prompt = prompt[int(len(prompt) * 0.5):]
+                err_msg = str(e).lower()
+                if any(p in err_msg for p in ("too long", "exceed", "token limit", "too large", "payload size")):
+                    prompt = prompt[int(len(prompt) * 0.4):]
                 elif "please wait" in str(e):
                     time.sleep(20)
                 retries -= 1

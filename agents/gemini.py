@@ -64,44 +64,74 @@ class AsyncGeminiAgent(AsyncBaseAgent):
 
         return responses
 
-    def _generate(self, prompt, json_mode=False, temperature=None, max_tokens=None, history=None, response_format=None):
-        # Prepare generation config
-        config = {}
-        
-        if max_tokens is not None:
-            config['max_output_tokens'] = max_tokens
-        elif hasattr(self.args, 'max_tokens'):
-            config['max_output_tokens'] = self.args.max_tokens
-            
-        if temperature is not None:
-            config['temperature'] = temperature
-        elif hasattr(self.args, 'temperature'):
-            config['temperature'] = self.args.temperature
-        
-        # Handle JSON mode
-        if json_mode:
-            config['response_mime_type'] = 'application/json'
-        #     config['response_schema'] = list[Recipe]  # Default schema, can be made configurable
-        
-        # # Handle structured output
-        elif response_format:
-            config['response_mime_type'] = 'application/json'
-        #     config['response_schema'] = response_format
-        
-        # Prepare contents
+    _CONTEXT_LENGTH_PATTERNS = (
+        "too many tokens", "too long", "exceeds the limit",
+        "payload size", "request is too large", "token limit",
+        "content too large", "prompt is too long",
+    )
+
+    def _is_context_length_error(self, error):
+        msg = str(error).lower()
+        return any(p in msg for p in self._CONTEXT_LENGTH_PATTERNS)
+
+    def _truncate_prompt(self, prompt, fraction_to_cut):
+        """Truncate the front of the prompt (earlier conversations) by a character fraction."""
         if isinstance(prompt, str):
+            return prompt[int(len(prompt) * fraction_to_cut):]
+        if isinstance(prompt, list):
+            total_text = sum(
+                len(part.get("parts", [{}])[0].get("text", ""))
+                for part in prompt if isinstance(part, dict)
+            )
+            budget = int(total_text * (1 - fraction_to_cut))
+            kept = []
+            running = 0
+            for part in reversed(prompt):
+                if isinstance(part, dict):
+                    text = part.get("parts", [{}])[0].get("text", "")
+                    running += len(text)
+                    kept.append(part)
+                    if running >= budget:
+                        break
+            return list(reversed(kept)) if kept else prompt
+        return prompt
+
+    def _generate(self, prompt, json_mode=False, temperature=None, max_tokens=None, history=None, response_format=None):
+        retries = 5
+        while retries > 0:
+            config = {}
+
+            if max_tokens is not None:
+                config['max_output_tokens'] = max_tokens
+            elif hasattr(self.args, 'max_tokens'):
+                config['max_output_tokens'] = self.args.max_tokens
+
+            if temperature is not None:
+                config['temperature'] = temperature
+            elif hasattr(self.args, 'temperature'):
+                config['temperature'] = self.args.temperature
+
+            if json_mode:
+                config['response_mime_type'] = 'application/json'
+            elif response_format:
+                config['response_mime_type'] = 'application/json'
+
             contents = prompt
-        else:
-            contents = prompt
-        
-        # Generate content
-        output = self.client.models.generate_content(
-            model=self.args.model,
-            contents=contents,
-            config=config if config else None
-        )
-        
-        return output
+
+            try:
+                output = self.client.models.generate_content(
+                    model=self.args.model,
+                    contents=contents,
+                    config=config if config else None
+                )
+                return output
+            except Exception as e:
+                if self._is_context_length_error(e):
+                    cut = 0.2 if retries > 1 else 0.5
+                    prompt = self._truncate_prompt(prompt, cut)
+                retries -= 1
+                if retries == 0:
+                    raise Exception(f"Failed to generate response: {e}")
 
     def _generate_from_messages(self, messages, json_mode=False, temperature=None, max_tokens=None, response_format=None):
         # Convert messages to the format expected by Gemini
